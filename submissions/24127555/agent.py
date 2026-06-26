@@ -21,6 +21,7 @@ IMPORTANT:
 """
 
 import sys
+import random
 from pathlib import Path
 
 # Add src to path to import the interface
@@ -39,19 +40,22 @@ class PacmanAgent(BasePacmanAgent):
     
     Implement your search algorithm to find and catch the ghost.
     Suggested algorithms: BFS, DFS, A*, Greedy Best-First
+
+    [DFS]
     """
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.pacman_speed = max(1, int(kwargs.get("pacman_speed", 1)))
+        self.pacman_speed = 2 # self.pacman_speed = max(1, int(kwargs.get("pacman_speed", 1)))
         # TODO: Initialize any data structures you need
         # Examples:
         # - self.path = []  # Store planned path
         # - self.visited = set()  # Track visited positions
-        self.name = "Template Pacman"
+        self.name = "DFS Pacman"
         # Memory for limited observation mode
         self.last_known_enemy_pos = None
-    
+        self.last_position = None
+
     def step(self, map_state: np.ndarray, 
              my_position: tuple, 
              enemy_position: tuple,
@@ -69,48 +73,66 @@ class PacmanAgent(BasePacmanAgent):
             Move or (Move, steps): Direction to move (optionally with step count)
         """
         # TODO: Implement your search algorithm here
-        
-        # Update memory if enemy is visible
         if enemy_position is not None:
             self.last_known_enemy_pos = enemy_position
-        
-        # Use current sighting, fallback to last known, or explore
+
         target = enemy_position or self.last_known_enemy_pos
-        
+
         if target is None:
-            # No information about enemy - explore randomly
             for move in [Move.UP, Move.DOWN, Move.LEFT, Move.RIGHT]:
                 if self._is_valid_move(my_position, move, map_state):
+                    self.last_position = my_position
                     return (move, 1)
             return (Move.STAY, 1)
-        
-        # Example: Simple greedy approach (replace with your algorithm)
-        row_diff = target[0] - my_position[0]
-        col_diff = target[1] - my_position[1]
-        
-        # Try to move towards ghost
-        if abs(row_diff) > abs(col_diff):
-            primary_move = Move.DOWN if row_diff > 0 else Move.UP
-            desired_steps = abs(row_diff)
-        else:
-            primary_move = Move.RIGHT if col_diff > 0 else Move.LEFT
-            desired_steps = abs(col_diff)
 
-        action = self._choose_action(
-            my_position,
-            [primary_move],
-            map_state,
-            desired_steps
-        )
-        if action:
-            return action
+        full_path = self._dfs_find_path(my_position, target, map_state)
 
-        # If the primary direction is blocked, try other moves
+        if full_path:
+            # first step
+            step1_pos = full_path[0]
+
+            # checking last step
+            if self.last_position is not None and step1_pos == self.last_position:
+                alternative_move = self._find_non_repeating_move(my_position, map_state)
+                if alternative_move:
+                    self.last_position = my_position
+                    return (alternative_move, 1)
+                else:
+                    self.last_position = None
+
+            delta_row1 = step1_pos[0] - my_position[0]
+            delta_col1 = step1_pos[1] - my_position[1]
+
+            chosen_move = Move.STAY
+            if delta_row1 == -1:
+                chosen_move = Move.UP
+            elif delta_row1 == 1:
+                chosen_move = Move.DOWN
+            elif delta_col1 == -1:
+                chosen_move = Move.LEFT
+            elif delta_col1 == 1:
+                chosen_move = Move.RIGHT
+
+            # second step
+            if len(full_path) >= 2 and self.pacman_speed >= 2:
+                step2_pos = full_path[1]
+                delta_row2 = step2_pos[0] - step1_pos[0]
+                delta_col2 = step2_pos[1] - step1_pos[1]
+
+                if delta_row1 == delta_row2 and delta_col1 == delta_col2:
+                    self.last_position = my_position
+                    return (chosen_move, 2)
+
+            if chosen_move != Move.STAY:
+                self.last_position = my_position
+                return (chosen_move, 1)
+
         fallback_moves = [Move.UP, Move.DOWN, Move.LEFT, Move.RIGHT]
         action = self._choose_action(my_position, fallback_moves, map_state, self.pacman_speed)
         if action:
+            self.last_position = my_position
             return action
-        
+
         return (Move.STAY, 1)
     
     # Helper methods (you can add more)
@@ -149,6 +171,39 @@ class PacmanAgent(BasePacmanAgent):
         
         return map_state[row, col] == 0
 
+    def _dfs_find_path(self, start: tuple, target: tuple, map_state: np.ndarray) -> list:
+        if start == target:
+            return []
+        stack = [[start]]
+        visited = {start}
+        while stack:
+            path = stack.pop()
+            current_pos = path[-1]
+            if current_pos == target:
+                return path[1:]
+            row, col = current_pos
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                next_pos = (row + dr, col + dc)
+                if self._is_valid_position(next_pos, map_state) and next_pos not in visited:
+                    visited.add(next_pos)
+                    new_path = list(path)
+                    new_path.append(next_pos)
+                    stack.append(new_path)
+        return []
+
+    def _find_non_repeating_move(self, current_pos: tuple, map_state: np.ndarray) -> Move:
+        valid_alternatives = []
+        for move in [Move.UP, Move.DOWN, Move.LEFT, Move.RIGHT]:
+            delta_row, delta_col = move.value
+            next_pos = (current_pos[0] + delta_row, current_pos[1] + delta_col)
+
+            if self._is_valid_position(next_pos, map_state):
+                if self.last_position is None or next_pos != self.last_position:
+                    valid_alternatives.append(move)
+
+        if valid_alternatives:
+            return random.choice(valid_alternatives)
+        return None
 
 class GhostAgent(BaseGhostAgent):
     """
@@ -181,40 +236,49 @@ class GhostAgent(BaseGhostAgent):
             Move: One of Move.UP, Move.DOWN, Move.LEFT, Move.RIGHT, Move.STAY
         """
         # TODO: Implement your search algorithm here
-        
-        # Update memory if enemy is visible
-        if enemy_position is not None:
-            self.last_known_enemy_pos = enemy_position
-        
-        # Use current sighting, fallback to last known, or move randomly
-        threat = enemy_position or self.last_known_enemy_pos
-        
-        if threat is None:
-            # No information about enemy - move randomly
+        if enemy_position is None:
+            valid_moves = []
             for move in [Move.UP, Move.DOWN, Move.LEFT, Move.RIGHT]:
                 if self._is_valid_move(my_position, move, map_state):
-                    return move
-            return Move.STAY
-        
-        # Example: Simple evasive approach (replace with your algorithm)
-        row_diff = my_position[0] - threat[0]
-        col_diff = my_position[1] - threat[1]
-        
-        # Try to move away from Pacman
-        if abs(row_diff) > abs(col_diff):
-            move = Move.DOWN if row_diff > 0 else Move.UP
-        else:
-            move = Move.RIGHT if col_diff > 0 else Move.LEFT
-        
-        # Check if move is valid
-        if self._is_valid_move(my_position, move, map_state):
-            return move
-        
-        # If not valid, try other moves
+                    valid_moves.append(move)
+            chosen_move = random.choice(valid_moves) if valid_moves else Move.STAY
+            return chosen_move
+
+        pacman_pos = enemy_position
+        current_distance = self._calculate_distance(my_position, pacman_pos)
+        scored_moves = {}
+
         for move in [Move.UP, Move.DOWN, Move.LEFT, Move.RIGHT]:
-            if self._is_valid_move(my_position, move, map_state):
-                return move
-        
+            delta_row, delta_col = move.value
+            next_pos = (my_position[0] + delta_row, my_position[1] + delta_col)
+
+            if self._is_valid_position(next_pos, map_state):
+                score = 0
+
+                # 1
+                next_dist = self._calculate_distance(next_pos, pacman_pos)
+                if next_dist > current_distance:
+                    score += 1
+
+                # 2
+                if next_pos[0] != pacman_pos[0] and next_pos[1] != pacman_pos[1]:
+                    score += 2
+
+                # 3
+                if not self._is_dead_end(next_pos, map_state):
+                    score += 5
+
+                if score not in scored_moves:
+                    scored_moves[score] = []
+                scored_moves[score].append(move)
+
+        if scored_moves:
+            max_score = max(scored_moves.keys())
+            best_moves = scored_moves[max_score]
+            chosen_move = random.choice(best_moves)
+
+            return chosen_move
+
         return Move.STAY
     
     # Helper methods (you can add more)
@@ -234,3 +298,18 @@ class GhostAgent(BaseGhostAgent):
             return False
         
         return map_state[row, col] == 0
+
+    def _is_dead_end(self, pos: tuple, map_state: np.ndarray) -> bool:
+        """"""
+        row, col = pos
+        valid_neighbors = 0
+        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            next_pos = (row + dr, col + dc)
+            if self._is_valid_position(next_pos, map_state):
+                valid_neighbors += 1
+
+        return valid_neighbors <= 1
+
+    def _calculate_distance(self, pos1: tuple, pos2: tuple) -> int:
+        """"""
+        return abs(pos1[0] - pos2[0]) + abs(pos1[1] - pos2[1])
