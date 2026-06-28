@@ -209,45 +209,50 @@ class GhostAgent(BaseGhostAgent):
     """
     Ghost (Hider) Agent - Goal: Avoid being caught
     
-    Implement your search algorithm to evade Pacman as long as possible.
-    Suggested algorithms: BFS (find furthest point), Minimax, Monte Carlo
+    Implement search algorithm to evade Pacman as long as possible.
     """
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        # TODO: Initialize any data structures you need
-        # Memory for limited observation mode
+        self.name = "Smart Ghost"
         self.last_known_enemy_pos = None
-    
+
     def step(self, map_state: np.ndarray, 
              my_position: tuple, 
              enemy_position: tuple,
              step_number: int) -> Move:
         """
-        Decide the next move.
-        
-        Args:
-            map_state: 2D numpy array where 1=wall, 0=empty, -1=unseen (fog)
-            my_position: Your current (row, col) in absolute coordinates
-            enemy_position: Pacman's (row, col) if visible, None otherwise
-            step_number: Current step number (starts at 1)
-            
-        Returns:
-            Move: One of Move.UP, Move.DOWN, Move.LEFT, Move.RIGHT, Move.STAY
+        Decide the next move for Ghost.
         """
-        # TODO: Implement your search algorithm here
-        if enemy_position is None:
+        # Cập nhật vị trí của Pacman nếu nhìn thấy
+        if enemy_position is not None:
+            self.last_known_enemy_pos = enemy_position
+
+        target_pacman = enemy_position or self.last_known_enemy_pos
+
+        # TRƯỜNG HỢP 1: Không biết Pacman ở đâu (Sương mù bao phủ) -> Đi ngẫu nhiên hợp lệ
+        if target_pacman is None:
             valid_moves = []
             for move in [Move.UP, Move.DOWN, Move.LEFT, Move.RIGHT]:
                 if self._is_valid_move(my_position, move, map_state):
-                    valid_moves.append(move)
-            chosen_move = random.choice(valid_moves) if valid_moves else Move.STAY
-            return chosen_move
+                    # Ưu tiên không đi vào ngõ cụt ngay cả khi đi ngẫu nhiên
+                    next_pos = (my_position[0] + move.value[0], my_position[1] + move.value[1])
+                    if not self._is_dead_end(next_pos, map_state):
+                        valid_moves.append(move)
+            
+            # Nếu tất cả đều là ngõ cụt thì mới chấp nhận đi vào
+            if not valid_moves:
+                for move in [Move.UP, Move.DOWN, Move.LEFT, Move.RIGHT]:
+                    if self._is_valid_move(my_position, move, map_state):
+                        valid_moves.append(move)
 
-        pacman_pos = enemy_position
-        current_distance = self._calculate_distance(my_position, pacman_pos)
+            return random.choice(valid_moves) if valid_moves else Move.STAY
+
+        # TRƯỜNG HỢP 2: Đã biết vị trí (hoặc vị trí cuối cùng) của Pacman
+        current_distance = self._calculate_distance(my_position, target_pacman)
         scored_moves = {}
 
+        # Lan lân cận 4 hướng để đánh giá điểm số
         for move in [Move.UP, Move.DOWN, Move.LEFT, Move.RIGHT]:
             delta_row, delta_col = move.value
             next_pos = (my_position[0] + delta_row, my_position[1] + delta_col)
@@ -255,61 +260,63 @@ class GhostAgent(BaseGhostAgent):
             if self._is_valid_position(next_pos, map_state):
                 score = 0
 
-                # 1
-                next_dist = self._calculate_distance(next_pos, pacman_pos)
+                # Tiêu chí 1: Đi xa Pacman hơn vị trí hiện tại
+                next_dist = self._calculate_distance(next_pos, target_pacman)
                 if next_dist > current_distance:
-                    score += 1
+                    score += 10
+                elif next_dist == current_distance:
+                    score += 2  # Đi ngang bằng điểm vẫn tốt hơn là đi lại gần
 
-                # 2
-                if next_pos[0] != pacman_pos[0] and next_pos[1] != pacman_pos[1]:
-                    score += 2
+                # Tiêu chí 2: Tránh chung hàng hoặc chung cột với Pacman
+                if next_pos[0] != target_pacman[0] and next_pos[1] != target_pacman[1]:
+                    score += 15
 
-                # 3
+                # Tiêu chí 3: Tuyệt đối tránh ngõ cụt (Trừ khi bị dồn vào đường cùng)
                 if not self._is_dead_end(next_pos, map_state):
-                    score += 5
+                    score += 30
 
+                # Lưu các nước đi theo thang điểm tương ứng
                 if score not in scored_moves:
                     scored_moves[score] = []
                 scored_moves[score].append(move)
 
+        # Chọn nước đi có điểm số cao nhất dựa trên các tiêu chí
         if scored_moves:
             max_score = max(scored_moves.keys())
             best_moves = scored_moves[max_score]
-            chosen_move = random.choice(best_moves)
-
-            return chosen_move
+            return random.choice(best_moves)
 
         return Move.STAY
     
-    # Helper methods (you can add more)
+    # --- Các hàm bổ trợ (Helper Methods) ---
     
     def _is_valid_move(self, pos: tuple, move: Move, map_state: np.ndarray) -> bool:
-        """Check if a move from pos is valid."""
+        """Kiểm tra hướng đi từ vị trí hiện tại có hợp lệ không."""
         delta_row, delta_col = move.value
         new_pos = (pos[0] + delta_row, pos[1] + delta_col)
-        return self._is_valid_position(new_pos, map_state)
+        return self._is_all_day_valid_position(new_pos, map_state)
     
     def _is_valid_position(self, pos: tuple, map_state: np.ndarray) -> bool:
-        """Check if a position is valid (not a wall and within bounds)."""
+        """Kiểm tra ô chỉ định nằm trong bản đồ và không phải là tường."""
         row, col = pos
         height, width = map_state.shape
         
         if row < 0 or row >= height or col < 0 or col >= width:
             return False
         
-        return map_state[row, col] == 0
+        # 0 là đường trống, chấp nhận cả ô -1 (sương mù) đối với Ghost nếu cần di chuyển ẩn nấp
+        return map_state[row, col] == 0 or map_state[row, col] == -1
 
     def _is_dead_end(self, pos: tuple, map_state: np.ndarray) -> bool:
-        """"""
+        """Kiểm tra xem một ô có phải ngõ cụt (chỉ có duy nhất 1 đường ra/vào)."""
         row, col = pos
         valid_neighbors = 0
         for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
             next_pos = (row + dr, col + dc)
             if self._is_valid_position(next_pos, map_state):
                 valid_neighbors += 1
-
         return valid_neighbors <= 1
 
     def _calculate_distance(self, pos1: tuple, pos2: tuple) -> int:
-        """"""
+        """Tính khoảng cách Manhattan giữa 2 vị trí."""
         return abs(pos1[0] - pos2[0]) + abs(pos1[1] - pos2[1])
