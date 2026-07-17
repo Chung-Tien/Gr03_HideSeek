@@ -1,10 +1,12 @@
 """
-Mã nguồn Agent chính thức của Nhóm 03 - Phân hệ GhostAgent (Hide Agent)
-Đáp ứng các tiêu chí: Tối đa khoảng cách, Né trục thẳng hàng/cột, Tránh ngõ cụt.
+Mã nguồn Agent chính thức của Nhóm 03 
+- Phân hệ GhostAgent (Hide Agent): Tối đa khoảng cách, Né trục thẳng hàng/cột, Tránh ngõ cụt.
+- Phân hệ PacmanAgent (Seek Agent): Thuật toán BFS tìm đường ngắn nhất, xử lý tăng tốc (Speed multiplier).
 """
 
 import sys
 from pathlib import Path
+from collections import deque  # NÂNG CẤP: Thêm thư viện deque để tối ưu hóa hàng đợi cho BFS
 
 # Cấu hình tự động trỏ đường dẫn về thư mục src để import framework
 src_path = Path(__file__).parent.parent.parent / "src"
@@ -19,8 +21,9 @@ import random
 
 class PacmanAgent(BasePacmanAgent):
     """
-    Placeholder cho Pacman Agent (Lấy thuật toán Greedy mẫu của trường).
-    Nhóm có thể tối ưu thêm class này sau ở phân hệ Seeker.
+    Pacman Agent (Seek Agent) đã được nâng cấp.
+    Chiến thuật: Sử dụng Breadth-First Search (BFS) để luôn tìm được đường đi ngắn nhất
+    đến vị trí mục tiêu, vượt qua mọi chướng ngại vật (tường).
     """
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -29,24 +32,86 @@ class PacmanAgent(BasePacmanAgent):
         self.last_known_enemy_pos = None
     
     def step(self, map_state: np.ndarray, my_position: tuple, enemy_position: tuple, step_number: int):
+        # 1. Cập nhật vị trí của Ghost vào bộ nhớ (Phòng trường hợp sương mù)
         if enemy_position is not None:
             self.last_known_enemy_pos = enemy_position
+            
         target = enemy_position or self.last_known_enemy_pos
-        if target is None:
-            return (Move.RIGHT, 1)
-        row_diff, col_diff = target[0] - my_position[0], target[1] - my_position[1]
-        move = Move.STAY
-        if abs(row_diff) > abs(col_diff):
-            move = Move.DOWN if row_diff > 0 else Move.UP
-        else:
-            move = Move.RIGHT if col_diff > 0 else Move.LEFT
         
-        # Kiểm tra tính hợp lệ tối thiểu
-        dr, dc = move.value
-        np_pos = (my_position[0] + dr, my_position[1] + dc)
-        if 0 <= np_pos[0] < map_state.shape[0] and 0 <= np_pos[1] < map_state.shape[1] and map_state[np_pos] == 0:
+        # Nếu chưa từng thấy Ghost, chạy ngẫu nhiên để mở map
+        if target is None:
+            valid_moves = [m for m in [Move.UP, Move.DOWN, Move.LEFT, Move.RIGHT] 
+                           if self._is_valid_position(self._apply_move(my_position, m), map_state)]
+            move = random.choice(valid_moves) if valid_moves else Move.STAY
             return (move, 1)
+
+        # 2. NÂNG CẤP: Dùng BFS để tìm mảng các bước đi ngắn nhất đến Ghost
+        path = self._bfs_find_path(my_position, target, map_state)
+        
+        # Nếu có đường đi (path không rỗng)
+        if path:
+            first_move = path[0]
+            consecutive_steps = 1
+            
+            # 3. NÂNG CẤP: Tối ưu hóa số bước nhảy (nếu trò chơi cho phép pacman_speed > 1)
+            # Kiểm tra xem Pacman có thể đi thẳng liên tiếp bao nhiêu ô trên cùng 1 hướng
+            for next_move in path[1:self.pacman_speed]:
+                if next_move == first_move:
+                    consecutive_steps += 1
+                else:
+                    break # Gặp ngã rẽ thì dừng lại không tăng tốc nữa
+                    
+            return (first_move, consecutive_steps)
+            
+        # Nếu không tìm thấy đường (Ghost bị vây kín hoặc lỗi), đứng yên
         return (Move.STAY, 1)
+
+    # --- CÁC HÀM BỔ TRỢ CHO PACMAN (NÂNG CẤP) ---
+
+    def _bfs_find_path(self, start: tuple, goal: tuple, map_state: np.ndarray) -> list:
+        """Thuật toán BFS tìm đường đi ngắn nhất từ start đến goal."""
+        # Queue lưu trữ các node cần duyệt: (tọa_độ_hiện_tại, danh_sách_nước_đi_đã_đi)
+        queue = deque([(start, [])])
+        # Set lưu tọa độ đã duyệt qua để tránh đi vòng tròn (infinite loop)
+        visited = set([start])
+        
+        # Để an toàn, giới hạn số vòng lặp phòng trường hợp map quá khổng lồ
+        max_iterations = 2000 
+        iterations = 0
+        
+        while queue and iterations < max_iterations:
+            iterations += 1
+            current_pos, path = queue.popleft()
+            
+            # Nếu đã đến được chỗ của Ghost -> Trả về con đường đã tìm được
+            if current_pos == goal:
+                return path
+                
+            # Duyệt 4 hướng xung quanh
+            for move in [Move.UP, Move.DOWN, Move.LEFT, Move.RIGHT]:
+                next_pos = self._apply_move(current_pos, move)
+                
+                # Nếu vị trí hợp lệ và chưa từng đi qua
+                if self._is_valid_position(next_pos, map_state) and next_pos not in visited:
+                    visited.add(next_pos)
+                    # Thêm nước đi mới vào lịch sử hành trình
+                    new_path = path + [move]
+                    queue.append((next_pos, new_path))
+                    
+        return [] # Trả về list rỗng nếu không tìm thấy đường
+
+    def _apply_move(self, pos: tuple, move: Move) -> tuple:
+        """Tính toán tọa độ mới dựa trên nước đi."""
+        dr, dc = move.value
+        return (pos[0] + dr, pos[1] + dc)
+
+    def _is_valid_position(self, pos: tuple, map_state: np.ndarray) -> bool:
+        """Kiểm tra tọa độ có nằm trong bản đồ và không phải là tường (1)."""
+        r, c = pos
+        h, w = map_state.shape
+        if r < 0 or r >= h or c < 0 or c >= w:
+            return False
+        return map_state[r, c] == 0  # 0 là ô trống đi được
 
 
 class GhostAgent(BaseGhostAgent):
