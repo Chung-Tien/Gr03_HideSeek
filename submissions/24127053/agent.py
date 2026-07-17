@@ -1,23 +1,19 @@
 """
-NHẬT KÝ SỬA CODE SO VỚI BẢN CŨ:
-- Pacman: 
-  + CŨ: Dùng BFS loang đều để tìm đường, gặp map to là chạy bị lag với dễ bị timeout
-  + MỚI: Đổi sang thuật toán A* dùng heapq, hướng thẳng tới Ghost nên chại nhanh hơn
-- Ghost:
-  + CŨ: Tính khoảng cách Manhattan (đường chim bay) nên hay bị vô tường
-        Phạt ngõ cụt -60 nhẹ nên vẫn hay tự chui đầu vào tường
-  + MỚI: Tính khoảng cách đi bộ thực tế (True Distance) bằng A*
-        Thêm cái cache lưu khoảng cách để k bị tính đi tính lại
-        Thêm hàm lookahead check xem lượt tới Pacman có chạy thẳng 2 ô tới mình k
-        Tăng phạt ngõ cụt lên -8000 cho nó sợ k dám chui vào
+Mã số sinh viên: 24127053
+Đội thi: Gr03_HideSeek
+Thuật toán sử dụng: 
+- Pacman (Seeker): A* Search tối ưu hóa đường đi ngắn nhất kết hợp bộ kích tốc (Speed Multiplier).
+- Ghost (Hider): Khai thác cơ chế giới hạn tốc độ khúc cua của Pacman bằng cách tối đa hóa 
+                 số lượt di chuyển thực tế của Pacman (Pacman-Steps Metric) để kéo dài thời gian sống sót.
 """
 
 import sys
 from pathlib import Path
-import heapq  # dùng cái này làm hàng đợi ưu tiên cho A*
+import heapq
 import random
 import numpy as np
 
+# Thêm thư mục src vào hệ thống để import chính xác các class giao diện từ framework
 src_path = Path(__file__).parent.parent.parent / "src"
 sys.path.insert(0, str(src_path))
 
@@ -28,210 +24,183 @@ from environment import Move
 
 class PacmanAgent(BasePacmanAgent):
     """
-    Con Pacman đi săn Ghost (đội Seeker)
+    Pacman Agent (Seeker) - Đi săn Ghost dùng thuật toán A* và tối ưu tốc độ đường thẳng.
     """
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.name = "Gr03_Seeker_AStar_24127053"
-        # lấy tốc độ tối đa được cấu hình, nếu lỗi thù mặc định cho bằng 2
         self.pacman_speed = max(1, int(kwargs.get("pacman_speed", 2))) 
-        # biến tạm để nhớ vị trí cuối cùng của ghost khi bị mất dấu trong sương mù
         self.last_known_enemy_pos = None 
     
     def step(self, map_state: np.ndarray, my_position: tuple, enemy_position: tuple, step_number: int):
-        """
-        Hàm xử lý chính mỗi lượt của pacman, trả về hướng đi với số bước
-        """
-        # thấy ghost thỳ phải note lại toạ độ liền
         if enemy_position is not None:
             self.last_known_enemy_pos = enemy_position
             
-        # ưu tiên đuổi theo vị trí mới nhất, ko thấy thì chạy tới chỗ cũ vừa lưu
         target = enemy_position or self.last_known_enemy_pos
         
-        # nếu mất dấu hoàn toàn cho chạy bừa vô mấy ô trống để dò đường :v
         if target is None:
-            # lọc mấy hướng đi hợp lệ ko bị đụng tường
             valid_moves = [m for m in [Move.UP, Move.DOWN, Move.LEFT, Move.RIGHT] 
                            if self._is_valid(self._apply_move(my_position, m), map_state)]
-            # có đường thì bốc đại 1 hướng, ko có thù đứng im
-            return (random.choice(valid_moves), 1) if valid_moves else (Move.STAY, 1)
+            return (valid_moves[0], 1) if valid_moves else (Move.STAY, 1)
 
-        # gọi thuật toán A* để tìm đường ngắn nhất tới con Ghost
         path = self._astar_find_path(my_position, target, map_state)
         
-        # nếu A* tìm đc đường đi
         if path:
-            first_move = path[0] # lấy nước đi đầu tiên để chạy
-            consecutive_steps = 1 # mặc định đi 1 ô trc đã
+            first_move = path[0]
+            consecutive_steps = 1
             
-            # khúc này tận dụng speed multiplier để check xem đường phía trc có thẳng ko để phóng 2 lượt
             for next_move in path[1:self.pacman_speed]:
                 if next_move == first_move:
-                    consecutive_steps += 1 # đường thẳng băng thì cộng thêm bước chạy cho nhanh
+                    consecutive_steps += 1
                 else:
-                    break # gặp ngã rẽ hay cua quẹo thì dừng lại
+                    break
                     
             return (first_move, consecutive_steps)
             
-        # bí đường quá k biết đi đâu thì đứng im
         return (Move.STAY, 1)
 
     def _astar_find_path(self, start: tuple, goal: tuple, map_state: np.ndarray) -> list:
-        """ Thuật toán A* tìm đường ngắn nhất, tránh ngõ cụt ôn hơn cái BFS """
         if start == goal:
-            return [] # đứng trùng chỗ r thì khỏi đi mất công
+            return []
             
-        # open_set dùng heapq lưu: (điểm_f, chi_phí_g, tọa_độ, danh_sách_nước_đi)
-        # hàm heuristic tính bằng khoảng cách Manhattan
         h_start = abs(start[0] - goal[0]) + abs(start[1] - goal[1])
-        open_set = [(h_start, 0, start, [])]
-        
-        # dùng dict lưu mấy ô đã đi qua kèm chi phí g để tránh bị chạy vòng lặp vô tận
+        count = 0  
+        open_set = [(h_start, count, 0, start, [])]
         visited = {start: 0}
-        
-        h_max, w_max = map_state.shape # lấy kích thước map
+        h_max, w_max = map_state.shape
         
         while open_set:
-            # bốc cái ô có điểm f nhỏ nhất ra duyệt trc (ưu tiên ô hướng về phía mục tiêu)
-            _, g, current, path = heapq.heappop(open_set)
+            _, _, g, current, path = heapq.heappop(open_set)
             
-            # chạm đc vào người Ghost r thì trả về đường đi luôn
             if current == goal:
                 return path 
                 
-            # nếu đường này tốn sức hơn đường khác từng đi qua ô này thì bỏ qua
             if g > visited.get(current, float('inf')):
                 continue
                 
-            # quét 4 hướng lên xuống trái phải xem đi hướng nào ổn nhất
             for move in [Move.UP, Move.DOWN, Move.LEFT, Move.RIGHT]:
                 dr, dc = move.value
                 nr, nc = current[0] + dr, current[1] + dc
                 
-                # check xem ô tiếp theo có nằm trong map với là ô trống (0) ko, tường (1) thì bỏ
                 if 0 <= nr < h_max and 0 <= nc < w_max and map_state[nr, nc] == 0:
                     next_pos = (nr, nc)
-                    new_g = g + 1 # đi thêm 1 bước thì tốn thêm 1 công
+                    new_g = g + 1
                     
-                    # nếu tìm ra đường tối ưu hơn cho ô next_pos này
                     if new_g < visited.get(next_pos, float('inf')):
-                        visited[next_pos] = new_g # cập nhật kỷ lục mới cho ô này
-                        h_val = abs(nr - goal[0]) + abs(nc - goal[1]) # tính heuristic mới
-                        # nhét vào heapq tí so sánh tiếp
-                        heapq.heappush(open_set, (new_g + h_val, new_g, next_pos, path + [move]))
+                        visited[next_pos] = new_g
+                        h_val = abs(nr - goal[0]) + abs(nc - goal[1])
+                        count += 1
+                        heapq.heappush(open_set, (new_g + h_val, count, new_g, next_pos, path + [move]))
                         
-        return [] # đi hết map k thấy đường thì trả về rỗng
+        return []
 
     def _apply_move(self, pos: tuple, move: Move) -> tuple:
-        """ Hàm tính nhanh tọa độ mới khi đi theo một hướng nào đó """
         return (pos[0] + move.value[0], pos[1] + move.value[1])
 
     def _is_valid(self, pos: tuple, map_state: np.ndarray) -> bool:
-        """ hàm check xem ô đó có hợp pháp để bước chân vào k """
         r, c = pos
         return 0 <= r < map_state.shape[0] and 0 <= c < map_state.shape[1] and map_state[r, c] == 0
 
 
 class GhostAgent(BaseGhostAgent):
     """
-    Con Ghost né Pacman (đội Hider)
+    Ghost Agent (Ghost/Hider) - Chạy trốn thông minh, bắt Pacman tốn nhiều lượt đi nhất có thể.
     """
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.name = "Gr03_Ghost_Evasive_24127053"
         self.last_known_pacman_pos = None
-        # BỘ NHỚ ĐỆM CACHE: lưu khoảng cách mấy cặp ô, đỡ phải tính lại A* liên tục
-        self.distance_cache = {} 
+        self.path_cache = {} 
     
     def step(self, map_state: np.ndarray, my_position: tuple, enemy_position: tuple, step_number: int) -> Move:
-        """
-        Hàm xử lý chính mỗi lượt của Ghost để tìm hướng chạy trốn an toàn nhất
-        """
-        # thấy pacman thì ghi vô sổ tay toạ độ liền
         if enemy_position is not None:
             self.last_known_pacman_pos = enemy_position
             
         pacman_pos = enemy_position or self.last_known_pacman_pos
         
-        # mất dấu pacman hoàn toàn thì chạy đại vô ô trống nào an toàn cho đỡ đứng im chịu trận
+        # Thiết lập thứ tự ưu tiên cố định cho các nước đi để triệt tiêu tính ngẫu nhiên
+        move_priority = {Move.UP: 0, Move.RIGHT: 1, Move.DOWN: 2, Move.LEFT: 3, Move.STAY: 4}
+        
         if pacman_pos is None:
-            return self._get_random_safe_move(my_position, map_state)
+            # Chọn hướng đi hợp lệ đầu tiên theo độ ưu tiên nếu mất dấu Pacman
+            for m in sorted(move_priority.keys(), key=lambda x: move_priority[x]):
+                next_pos = (my_position[0] + m.value[0], my_position[1] + m.value[1])
+                if self._is_valid_position(next_pos, map_state):
+                    return m
+            return Move.STAY
             
         r_g, c_g = my_position
-        # mảng 5 hành động có thể làm
         possible_moves = [Move.UP, Move.DOWN, Move.LEFT, Move.RIGHT, Move.STAY]
         
-        best_moves = []
-        best_score = -float('inf') # đặt điểm tốt nhất ban đầu âm vô cùng để tí so sánh
+        # Reset cache đường đi ở mỗi lượt tính toán mới để tránh sai lệch dữ liệu
+        self.path_cache = {}
+        evaluated_moves = []
         
-        # vòng lặp chấm điểm từng nước đi để chọn ra cái tốt nhất
         for move in possible_moves:
             next_pos = (r_g + move.value[0], c_g + move.value[1])
             
-            # điểm đến k hợp lệ (đâm tường hoặc ngoài rìa) thì dẹp luôn k xét
             if not self._is_valid_position(next_pos, map_state):
                 continue
                 
-            # ĐOẠN NHÌN TRƯỚC: check trc tương lai xem bước vô ô này có bị pacman phóng thẳng đớp luôn ko
-            if self._can_pacman_snipe_me(next_pos, pacman_pos, map_state):
-                score = -999999 # ô tử thần, phạt điểm cực nặng để k bao giờ đi vào!!
+            # Tìm đường đi ngắn nhất từ ô dự kiến của Ghost đến Pacman
+            shortest_path = self._get_shortest_path(next_pos, pacman_pos, map_state)
+            
+            # Tính toán xem Pacman mất thực tế bao nhiêu LƯỢT ĐI (turns) để vượt qua quãng đường này
+            pacman_turns_needed = self._calculate_pacman_turns(shortest_path)
+            
+            if pacman_turns_needed <= 1:
+                # Vùng nguy hiểm chí mạng! Pacman có thể tóm gọn Ghost ngay trong lượt sau
+                score = -100000.0 + pacman_turns_needed * 10
             else:
-                # CẢI TIẾN: tính khoảng cách đi bộ thực tế né tường bằng A*
-                true_dist = self._get_true_distance(next_pos, pacman_pos, map_state)
-                score = true_dist * 150.0 # càng xa pacman điểm càng to, nhân thêm 150 cho máu
+                # Điểm số cốt lõi: Càng khiến Pacman mất nhiều lượt tiếp cận thì điểm càng cực kỳ cao!
+                score = pacman_turns_needed * 1000.0
                 
-                # đếm số đường lui xung quanh xem có bị dồn vô ngõ cụt ko
+                # Tránh các ngõ cụt nguy hiểm
                 escape_routes = self._count_walkable_neighbors(next_pos, map_state)
-                if move != Move.STAY:
-                    if escape_routes <= 1:
-                        score -= 8000  # ngõ cụt là trừ 8000 điểm cho nó đỡ chui vào
-                    elif escape_routes == 2:
-                        score -= 400   # đường hành lang đơn hẹp, hạn chế đi kẻo bị ép góc
-                else:
-                    # nếu chọn đứng im (STAY) mà pacman đang ở quá gần (khoảng cách thực <= 4)
-                    if true_dist <= 4:
-                        score -= 2000  # địch đến gần thì trừ điểm nặng cho biết đường chạy
+                if escape_routes <= 1:
+                    score -= 5000.0  # Phạt nặng ngõ cụt
+                elif escape_routes >= 3:
+                    score += 150.0   # Cộng thưởng ngã rẽ rộng mở để dễ luồn lách
+                    
+                # Phạt hành động đứng yên (chỉ chọn STAY khi các hướng khác cực kỳ nguy hiểm)
+                if move == Move.STAY:
+                    score -= 300.0
             
-            # thuật toán tìm max điểm cơ bản tự viết
-            if score > best_score:
-                best_score = score
-                best_moves = [move] # tìm đc đuòng tốt hơn thì reset lại danh sách
-            elif score == best_score:
-                best_moves.append(move) # bằng nhau thì nhét chung vào tí chọn ngẫu nhiên
-                
-        # bốc ngẫu nhiên 1 nước trong đám ngon nhất để tạo tính bất ngờ, tránh bị bắt bài
-        return random.choice(best_moves) if best_moves else Move.STAY
+            # Lưu lại điểm số và độ ưu tiên để sắp xếp
+            evaluated_moves.append((score, -move_priority[move], move))
+            
+        # Sắp xếp giảm dần theo điểm số, nếu bằng điểm thì ưu tiên nước đi có độ ưu tiên cao hơn (Deterministic)
+        evaluated_moves.sort(key=lambda x: (x[0], x[1]), reverse=True)
+        
+        return evaluated_moves[0][2] if evaluated_moves else Move.STAY
 
-    def _get_true_distance(self, start: tuple, goal: tuple, map_state: np.ndarray) -> int:
-        """ Đo khoảng cách thực tế đi trong mê cung chứ k chơi đường chim bay nha """
+    def _get_shortest_path(self, start: tuple, goal: tuple, map_state: np.ndarray) -> list:
+        """ Trả về toàn bộ danh sách các bước di chuyển ngắn nhất từ start đến goal """
         if start == goal:
-            return 0
+            return []
             
-        # chuẩn hóa key (ô nhỏ đứng trước) để đi từ A->B hay B->A cũng tính là 1 cặp, đỡ tốn cache
-        pair = (start, goal) if start < goal else (goal, start)
-        if pair in self.distance_cache:
-            return self.distance_cache[pair] # có sẵn kết quả r thì bốc ra xài luôn
+        cache_key = (start, goal)
+        if cache_key in self.path_cache:
+            return self.path_cache[cache_key]
             
-        # nếu cache chưa có, chạy A* thu gọn để tính khoảng cách thực tế giữa 2 ô
         h_start = abs(start[0] - goal[0]) + abs(start[1] - goal[1])
-        open_set = [(h_start, 0, start)]
+        count = 0
+        open_set = [(h_start, count, 0, start, [])]
         visited = {start: 0}
         h_max, w_max = map_state.shape
-        result_dist = 999 # mặc định nếu bị cô lập hoàn toàn k có đường thông nhau
         
         while open_set:
-            _, g, current = heapq.heappop(open_set)
+            _, _, g, current, path = heapq.heappop(open_set)
             
             if current == goal:
-                result_dist = g # tìm thấy đường r, lấy chi phí bước đi g làm khoảng cách luôn
-                break
+                self.path_cache[cache_key] = path
+                return path
                 
             if g > visited.get(current, float('inf')):
                 continue
                 
-            # quét nhanh 4 ô xung quanh lân cận
-            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            for move in [Move.UP, Move.DOWN, Move.LEFT, Move.RIGHT]:
+                dr, dc = move.value
                 nr, nc = current[0] + dr, current[1] + dc
                 if 0 <= nr < h_max and 0 <= nc < w_max and map_state[nr, nc] == 0:
                     next_pos = (nr, nc)
@@ -239,52 +208,42 @@ class GhostAgent(BaseGhostAgent):
                     if new_g < visited.get(next_pos, float('inf')):
                         visited[next_pos] = new_g
                         h_val = abs(nr - goal[0]) + abs(nc - goal[1])
-                        heapq.heappush(open_set, (new_g + h_val, new_g, next_pos))
+                        count += 1
+                        heapq.heappush(open_set, (new_g + h_val, count, new_g, next_pos, path + [move]))
                         
-        self.distance_cache[pair] = result_dist # nạp vào bộ nhớ cache để lượt sau khỏi mất công tính lại
-        return result_dist
+        self.path_cache[cache_key] = []
+        return []
 
-    def _can_pacman_snipe_me(self, ghost_pos: tuple, pacman_pos: tuple, map_state: np.ndarray) -> bool:
-        """ Hàm nhìn trước tương lai: giả lập xem lượt tới Pacman có kích tốc phóng thẳng tóm mình ko """
-        h_max, w_max = map_state.shape
-        
-        # thử duyệt qua mấy kịch bản hành động của pacman địch
-        for move in [Move.UP, Move.DOWN, Move.LEFT, Move.RIGHT, Move.STAY]:
-            curr_p = pacman_pos
+    def _calculate_pacman_turns(self, path: list) -> int:
+        """
+        Dựa vào danh sách bước đi, tính toán chính xác số LƯỢT DI CHUYỂN của Pacman.
+        Pacman đi thẳng: 2 ô/lượt. Gặp khúc cua: chỉ đi được 1 ô/lượt.
+        """
+        if not path:
+            return 0
             
-            # kịch bản pacman đứng im: check xem khoảng cách kề bên có chạm nhau chưa
-            if move == Move.STAY:
-                if abs(curr_p[0] - ghost_pos[0]) + abs(curr_p[1] - ghost_pos[1]) < 2:
-                    return True # sát nhau quá, nguy hiểm vcl!
-            else:
-                # kịch bản pacman phóng đường thẳng: giả lập pacman chại thẳng tối đa 2 ô liên tiếp
-                for _ in range(2): 
-                    nr, nc = curr_p[0] + move.value[0], curr_p[1] + move.value[1]
-                    # nếu đường thẳng đó trống trải đi đc
-                    if 0 <= nr < h_max and 0 <= nc < w_max and map_state[nr, nc] == 0:
-                        curr_p = (nr, nc) # pacman tiến lên 1 ô giả lập
-                        # nếu ô giả lập này nằm đè hoặc sát sạt ô Ghost định đi tới
-                        if abs(curr_p[0] - ghost_pos[0]) + abs(curr_p[1] - ghost_pos[1]) < 2:
-                            return True # kích hoạt cảnh báo nguy hiểm
-                    else:
-                        break # đụng tường chặn đứng hướng chạy thẳng thì dừng giả lập hướng này
-        return False # ô này check xong thấy an toàn
+        turns = 0
+        i = 0
+        n = len(path)
+        
+        while i < n:
+            current_direction = path[i]
+            segment_len = 0
+            # Pacman chỉ có thể đi tối đa 2 ô cùng chiều trong 1 lượt di chuyển
+            while i < n and path[i] == current_direction and segment_len < 2:
+                segment_len += 1
+                i += 1
+            turns += 1
+            
+        return turns
 
     def _is_valid_position(self, pos: tuple, map_state: np.ndarray) -> bool:
-        """ hàm check tọa độ xem có nằm trong map với ko phải tường ko """
         r, c = pos
         return 0 <= r < map_state.shape[0] and 0 <= c < map_state.shape[1] and map_state[r, c] == 0
 
     def _count_walkable_neighbors(self, pos: tuple, map_state: np.ndarray) -> int:
-        """ đếm xem xung quanh ô này có bao nhiêu lối đi trống để phát hiện ngõ cụt hiểm trở """
         count = 0
         for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
             if self._is_valid_position((pos[0] + dr, pos[1] + dc), map_state):
                 count += 1
         return count
-
-    def _get_random_safe_move(self, my_position: tuple, map_state: np.ndarray) -> Move:
-        """ hàm cứu cánh lúc mất dấu địch: lựa đại 1 ô trống xung quanh để chại """
-        safe_moves = [m for m in [Move.UP, Move.DOWN, Move.LEFT, Move.RIGHT, Move.STAY]
-                      if self._is_valid_position((my_position[0] + m.value[0], my_position[1] + m.value[1]), map_state)]
-        return random.choice(safe_moves) if safe_moves else Move.STAY
