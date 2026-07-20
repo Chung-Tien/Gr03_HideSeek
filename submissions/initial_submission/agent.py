@@ -38,16 +38,16 @@ import numpy as np
 class PacmanAgent(BasePacmanAgent):
     """
     Pacman (Seeker) Agent - Goal: Catch the Ghost
-    
+
     Implement your search algorithm to find and catch the ghost.
     Suggested algorithms: BFS, DFS, A*, Greedy Best-First
 
     [DFS]
     """
-    
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.pacman_speed = 2 # self.pacman_speed = max(1, int(kwargs.get("pacman_speed", 1)))
+        self.pacman_speed = 2  # self.pacman_speed = max(1, int(kwargs.get("pacman_speed", 1)))
         # TODO: Initialize any data structures you need
         # Examples:
         # - self.path = []  # Store planned path
@@ -57,19 +57,19 @@ class PacmanAgent(BasePacmanAgent):
         self.last_known_enemy_pos = None
         self.last_position = None
 
-    def step(self, map_state: np.ndarray, 
-             my_position: tuple, 
+    def step(self, map_state: np.ndarray,
+             my_position: tuple,
              enemy_position: tuple,
              step_number: int):
         """
         Decide the next move.
-        
+
         Args:
             map_state: 2D numpy array where 1=wall, 0=empty, -1=unseen (fog)
             my_position: Your current (row, col) in absolute coordinates
             enemy_position: Ghost's (row, col) if visible, None otherwise
             step_number: Current step number (starts at 1)
-            
+
         Returns:
             Move or (Move, steps): Direction to move (optionally with step count)
         """
@@ -126,9 +126,9 @@ class PacmanAgent(BasePacmanAgent):
             return action
 
         return (Move.STAY, 1)
-    
+
     # Helper methods (you can add more)
-    
+
     def _choose_action(self, pos: tuple, moves, map_state: np.ndarray, desired_steps: int):
         for move in moves:
             max_steps = min(self.pacman_speed, max(1, desired_steps))
@@ -148,19 +148,19 @@ class PacmanAgent(BasePacmanAgent):
             steps += 1
             current = next_pos
         return steps
-    
+
     def _is_valid_move(self, pos: tuple, move: Move, map_state: np.ndarray) -> bool:
         """Check if a move from pos is valid for at least one step."""
         return self._max_valid_steps(pos, move, map_state, 1) == 1
-    
+
     def _is_valid_position(self, pos: tuple, map_state: np.ndarray) -> bool:
         """Check if a position is valid (not a wall and within bounds)."""
         row, col = pos
         height, width = map_state.shape
-        
+
         if row < 0 or row >= height or col < 0 or col >= width:
             return False
-        
+
         return map_state[row, col] == 0
 
     def _get_move_from_delta(self, delta_row: int, delta_col: int) -> Move:
@@ -205,20 +205,21 @@ class PacmanAgent(BasePacmanAgent):
             return random.choice(valid_alternatives)
         return None
 
+
 class GhostAgent(BaseGhostAgent):
     """
     Ghost (Hider) Agent - Goal: Avoid being caught
-    
+
     Implement search algorithm to evade Pacman as long as possible.
     """
-    
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.name = "Smart Ghost"
         self.last_known_enemy_pos = None
 
-    def step(self, map_state: np.ndarray, 
-             my_position: tuple, 
+    def step(self, map_state: np.ndarray,
+             my_position: tuple,
              enemy_position: tuple,
              step_number: int) -> Move:
         """
@@ -239,7 +240,7 @@ class GhostAgent(BaseGhostAgent):
                     next_pos = (my_position[0] + move.value[0], my_position[1] + move.value[1])
                     if not self._is_dead_end(next_pos, map_state):
                         valid_moves.append(move)
-            
+
             # Nếu tất cả đều là ngõ cụt thì mới chấp nhận đi vào
             if not valid_moves:
                 for move in [Move.UP, Move.DOWN, Move.LEFT, Move.RIGHT]:
@@ -287,23 +288,23 @@ class GhostAgent(BaseGhostAgent):
             return random.choice(best_moves)
 
         return Move.STAY
-    
+
     # --- Các hàm bổ trợ (Helper Methods) ---
-    
+
     def _is_valid_move(self, pos: tuple, move: Move, map_state: np.ndarray) -> bool:
         """Kiểm tra hướng đi từ vị trí hiện tại có hợp lệ không."""
         delta_row, delta_col = move.value
         new_pos = (pos[0] + delta_row, pos[1] + delta_col)
         return self._is_valid_position(new_pos, map_state)
-    
+
     def _is_valid_position(self, pos: tuple, map_state: np.ndarray) -> bool:
         """Kiểm tra ô chỉ định nằm trong bản đồ và không phải là tường."""
         row, col = pos
         height, width = map_state.shape
-        
+
         if row < 0 or row >= height or col < 0 or col >= width:
             return False
-        
+
         # 0 là đường trống, chấp nhận cả ô -1 (sương mù) đối với Ghost nếu cần di chuyển ẩn nấp
         return map_state[row, col] == 0 or map_state[row, col] == -1
 
