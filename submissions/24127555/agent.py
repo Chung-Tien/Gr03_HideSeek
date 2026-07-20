@@ -22,6 +22,7 @@ IMPORTANT:
 
 import sys
 import random
+import heapq
 from pathlib import Path
 from collections import deque
 
@@ -38,38 +39,38 @@ import numpy as np
 class PacmanAgent(BasePacmanAgent):
     """
     Pacman (Seeker) Agent - Goal: Catch the Ghost
-    
+
     Implement your search algorithm to find and catch the ghost.
     Suggested algorithms: BFS, DFS, A*, Greedy Best-First
 
     [DFS]
     """
-    
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.pacman_speed = 2 # self.pacman_speed = max(1, int(kwargs.get("pacman_speed", 1)))
+        self.pacman_speed = 2  # self.pacman_speed = max(1, int(kwargs.get("pacman_speed", 1)))
         # TODO: Initialize any data structures you need
         # Examples:
         # - self.path = []  # Store planned path
         # - self.visited = set()  # Track visited positions
-        self.name = "BFS Pacman"
+        self.name = "A* Pacman"
         # Memory for limited observation mode
         self.last_known_enemy_pos = None
         self.last_position = None
 
-    def step(self, map_state: np.ndarray, 
-             my_position: tuple, 
+    def step(self, map_state: np.ndarray,
+             my_position: tuple,
              enemy_position: tuple,
              step_number: int):
         """
         Decide the next move.
-        
+
         Args:
             map_state: 2D numpy array where 1=wall, 0=empty, -1=unseen (fog)
             my_position: Your current (row, col) in absolute coordinates
             enemy_position: Ghost's (row, col) if visible, None otherwise
             step_number: Current step number (starts at 1)
-            
+
         Returns:
             Move or (Move, steps): Direction to move (optionally with step count)
         """
@@ -87,48 +88,30 @@ class PacmanAgent(BasePacmanAgent):
             return (Move.STAY, 1)
 
         # find the shortest path by BFS
-        full_path = self._bfs_find_path(my_position, target, map_state)
+        full_path = self._astar_find_path(my_position, target, map_state)
 
         if full_path:
             step1_pos = full_path[0]
-
-            if self.last_position is not None and step1_pos == self.last_position:
-                alternative_move = self._find_non_repeating_move(my_position, map_state)
-                if alternative_move:
-                    self.last_position = my_position
-                    return (alternative_move, 1)
-                else:
-                    self.last_position = None
-
             delta_row1 = step1_pos[0] - my_position[0]
             delta_col1 = step1_pos[1] - my_position[1]
-
             chosen_move = self._get_move_from_delta(delta_row1, delta_col1)
 
-            if len(full_path) >= 2 and self.pacman_speed >= 2:
+            if len(full_path) >= 2:
                 step2_pos = full_path[1]
                 delta_row2 = step2_pos[0] - step1_pos[0]
                 delta_col2 = step2_pos[1] - step1_pos[1]
                 next_move = self._get_move_from_delta(delta_row2, delta_col2)
 
                 if next_move == chosen_move:
-                    self.last_position = my_position
                     return (chosen_move, 2)
 
             if chosen_move != Move.STAY:
-                self.last_position = my_position
                 return (chosen_move, 1)
 
-        fallback_moves = [Move.UP, Move.DOWN, Move.LEFT, Move.RIGHT]
-        action = self._choose_action(my_position, fallback_moves, map_state, self.pacman_speed)
-        if action:
-            self.last_position = my_position
-            return action
-
         return (Move.STAY, 1)
-    
+
     # Helper methods (you can add more)
-    
+
     def _choose_action(self, pos: tuple, moves, map_state: np.ndarray, desired_steps: int):
         for move in moves:
             max_steps = min(self.pacman_speed, max(1, desired_steps))
@@ -148,36 +131,39 @@ class PacmanAgent(BasePacmanAgent):
             steps += 1
             current = next_pos
         return steps
-    
+
     def _is_valid_move(self, pos: tuple, move: Move, map_state: np.ndarray) -> bool:
         """Check if a move from pos is valid for at least one step."""
         return self._max_valid_steps(pos, move, map_state, 1) == 1
-    
+
     def _is_valid_position(self, pos: tuple, map_state: np.ndarray) -> bool:
         """Check if a position is valid (not a wall and within bounds)."""
         row, col = pos
         height, width = map_state.shape
-        
+
         if row < 0 or row >= height or col < 0 or col >= width:
             return False
-        
+
         return map_state[row, col] == 0
 
     def _get_move_from_delta(self, delta_row: int, delta_col: int) -> Move:
+        """Converts a coordinate offset into its corresponding Move enum direction."""
         for move in Move:
             if move.value == (delta_row, delta_col):
                 return move
         return Move.STAY
 
-    def _bfs_find_path(self, start: tuple, target: tuple, map_state: np.ndarray) -> list:
-        if start == target:
-            return []
+    def _astar_find_path(self, start: tuple, target: tuple, map_state: np.ndarray) -> list:
+        """Finds the shortest path from start to target using the A* search algorithm."""
+        def heuristic(a, b):
+            return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
-        queue = deque([(start, [])])
-        visited = {start}
+        open_set = []
+        heapq.heappush(open_set, (0 + heuristic(start, target), 0, start, []))
+        visited = {start: 0}
 
-        while queue:
-            current_pos, path = queue.popleft()
+        while open_set:
+            _, g, current_pos, path = heapq.heappop(open_set)
 
             if current_pos == target:
                 return path
@@ -187,128 +173,127 @@ class PacmanAgent(BasePacmanAgent):
                 dr, dc = move.value
                 next_pos = (row + dr, col + dc)
 
-                if self._is_valid_position(next_pos, map_state) and next_pos not in visited:
-                    visited.add(next_pos)
-                    queue.append((next_pos, path + [next_pos]))
-
+                if self._is_valid_position(next_pos, map_state):
+                    new_g = g + 1
+                    if next_pos not in visited or new_g < visited[next_pos]:
+                        visited[next_pos] = new_g
+                        f = new_g + heuristic(next_pos, target)
+                        heapq.heappush(open_set, (f, new_g, next_pos, path + [next_pos]))
         return []
 
-    def _find_non_repeating_move(self, current_pos: tuple, map_state: np.ndarray) -> Move:
-        valid_alternatives = []
-        for move in [Move.UP, Move.DOWN, Move.LEFT, Move.RIGHT]:
-            delta_row, delta_col = move.value
-            next_pos = (current_pos[0] + delta_row, current_pos[1] + delta_col)
-            if self._is_valid_position(next_pos, map_state):
-                if self.last_position is None or next_pos != self.last_position:
-                    valid_alternatives.append(move)
-        if valid_alternatives:
-            return random.choice(valid_alternatives)
-        return None
 
 class GhostAgent(BaseGhostAgent):
     """
     Ghost (Hider) Agent - Goal: Avoid being caught
-    
+
     Implement search algorithm to evade Pacman as long as possible.
     """
-    
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.name = "Smart Ghost"
+        self.name = "A* Ghost"
         self.last_known_enemy_pos = None
 
-    def step(self, map_state: np.ndarray, 
-             my_position: tuple, 
+    def step(self, map_state: np.ndarray,
+             my_position: tuple,
              enemy_position: tuple,
              step_number: int) -> Move:
         """
         Decide the next move for Ghost.
         """
-        # Cập nhật vị trí của Pacman nếu nhìn thấy
         if enemy_position is not None:
             self.last_known_enemy_pos = enemy_position
 
-        target_pacman = enemy_position or self.last_known_enemy_pos
+        threat = enemy_position or self.last_known_enemy_pos
 
-        # TRƯỜNG HỢP 1: Không biết Pacman ở đâu (Sương mù bao phủ) -> Đi ngẫu nhiên hợp lệ
-        if target_pacman is None:
-            valid_moves = []
-            for move in [Move.UP, Move.DOWN, Move.LEFT, Move.RIGHT]:
-                if self._is_valid_move(my_position, move, map_state):
-                    # Ưu tiên không đi vào ngõ cụt ngay cả khi đi ngẫu nhiên
-                    next_pos = (my_position[0] + move.value[0], my_position[1] + move.value[1])
-                    if not self._is_dead_end(next_pos, map_state):
-                        valid_moves.append(move)
-            
-            # Nếu tất cả đều là ngõ cụt thì mới chấp nhận đi vào
-            if not valid_moves:
-                for move in [Move.UP, Move.DOWN, Move.LEFT, Move.RIGHT]:
-                    if self._is_valid_move(my_position, move, map_state):
-                        valid_moves.append(move)
+        if threat is None:
+            # No information about enemy - move randomly
+            return self._random_move(my_position, map_state)
 
-            return random.choice(valid_moves) if valid_moves else Move.STAY
+        current_steps_to_catch = self._astar_pacman_steps_to_catch(threat, my_position, map_state)
 
-        # TRƯỜNG HỢP 2: Đã biết vị trí (hoặc vị trí cuối cùng) của Pacman
-        current_distance = self._calculate_distance(my_position, target_pacman)
-        scored_moves = {}
+        normal_moves = []
+        dead_end_moves = []
 
-        # Lan lân cận 4 hướng để đánh giá điểm số
         for move in [Move.UP, Move.DOWN, Move.LEFT, Move.RIGHT]:
-            delta_row, delta_col = move.value
-            next_pos = (my_position[0] + delta_row, my_position[1] + delta_col)
+            next_pos = (my_position[0] + move.value[0], my_position[1] + move.value[1])
 
             if self._is_valid_position(next_pos, map_state):
-                score = 0
+                exits = sum(1 for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]
+                            if self._is_valid_position((next_pos[0] + dr, next_pos[1] + dc), map_state))
 
-                # Tiêu chí 1: Đi xa Pacman hơn vị trí hiện tại
-                next_dist = self._calculate_distance(next_pos, target_pacman)
-                if next_dist > current_distance:
-                    score += 10
-                elif next_dist == current_distance:
-                    score += 2  # Đi ngang bằng điểm vẫn tốt hơn là đi lại gần
+                next_steps_to_catch = self._astar_pacman_steps_to_catch(threat, next_pos, map_state)
 
-                # Tiêu chí 2: Tránh chung hàng hoặc chung cột với Pacman
-                if next_pos[0] != target_pacman[0] and next_pos[1] != target_pacman[1]:
-                    score += 15
+                if exits <= 1:
+                    dead_end_moves.append((move, next_pos, next_steps_to_catch))
+                else:
+                    normal_moves.append((move, next_pos, next_steps_to_catch))
 
-                # Tiêu chí 3: Tuyệt đối tránh ngõ cụt (Trừ khi bị dồn vào đường cùng)
-                if not self._is_dead_end(next_pos, map_state):
-                    score += 30
+        is_trapped = (current_steps_to_catch <= 2) and (
+            all(steps <= 1 for _, _, steps in normal_moves) if normal_moves else True)
 
-                # Lưu các nước đi theo thang điểm tương ứng
-                if score not in scored_moves:
-                    scored_moves[score] = []
-                scored_moves[score].append(move)
+        if is_trapped:
+            all_possible_moves = normal_moves + dead_end_moves
+            best_survival_move = Move.STAY
+            max_survival = -1
 
-        # Chọn nước đi có điểm số cao nhất dựa trên các tiêu chí
-        if scored_moves:
-            max_score = max(scored_moves.keys())
-            best_moves = scored_moves[max_score]
-            return random.choice(best_moves)
+            for move, next_pos, next_steps in all_possible_moves:
+                if (move, next_pos) in [(m, p) for m, p, _ in dead_end_moves]:
+                    survival = self._calculate_dead_end_depth(next_pos, my_position, map_state)
+                else:
+                    survival = next_steps
+
+                if survival > max_survival:
+                    max_survival = survival
+                    best_survival_move = move
+
+            if best_survival_move != Move.STAY:
+                return best_survival_move
+
+        safe_normal_moves = [(m, steps) for m, _, steps in normal_moves if steps > 1]
+
+        if safe_normal_moves:
+            safe_normal_moves.sort(key=lambda x: x[1], reverse=True)
+            return safe_normal_moves[0][0]
+
+        if normal_moves: return normal_moves[0][0]
+        if dead_end_moves: return dead_end_moves[0][0]
 
         return Move.STAY
-    
+
     # --- Các hàm bổ trợ (Helper Methods) ---
-    
+
     def _is_valid_move(self, pos: tuple, move: Move, map_state: np.ndarray) -> bool:
-        """Kiểm tra hướng đi từ vị trí hiện tại có hợp lệ không."""
+        """Checks if a move from the current position is valid."""
         delta_row, delta_col = move.value
         new_pos = (pos[0] + delta_row, pos[1] + delta_col)
         return self._is_valid_position(new_pos, map_state)
-    
+
+    def _random_move(self, my_position: tuple, map_state: np.ndarray) -> Move:
+        """Random movement when enemy position is unknown."""
+        all_moves = [Move.UP, Move.DOWN, Move.LEFT, Move.RIGHT]
+        random.shuffle(all_moves)
+
+        for move in all_moves:
+            delta_row, delta_col = move.value
+            new_pos = (my_position[0] + delta_row, my_position[1] + delta_col)
+            if self._is_valid_position(new_pos, map_state):
+                return move
+
+        return Move.STAY
+
     def _is_valid_position(self, pos: tuple, map_state: np.ndarray) -> bool:
-        """Kiểm tra ô chỉ định nằm trong bản đồ và không phải là tường."""
+        """Checks if a position is within boundaries and not a wall."""
         row, col = pos
         height, width = map_state.shape
-        
+
         if row < 0 or row >= height or col < 0 or col >= width:
             return False
-        
-        # 0 là đường trống, chấp nhận cả ô -1 (sương mù) đối với Ghost nếu cần di chuyển ẩn nấp
+
         return map_state[row, col] == 0 or map_state[row, col] == -1
 
     def _is_dead_end(self, pos: tuple, map_state: np.ndarray) -> bool:
-        """Kiểm tra xem một ô có phải ngõ cụt (chỉ có duy nhất 1 đường ra/vào)."""
+        """Determines if a position is a dead end with at most one exit."""
         row, col = pos
         valid_neighbors = 0
         for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
@@ -318,5 +303,60 @@ class GhostAgent(BaseGhostAgent):
         return valid_neighbors <= 1
 
     def _calculate_distance(self, pos1: tuple, pos2: tuple) -> int:
-        """Tính khoảng cách Manhattan giữa 2 vị trí."""
+        """Calculates the Manhattan distance between two positions."""
         return abs(pos1[0] - pos2[0]) + abs(pos1[1] - pos2[1])
+
+    def _calculate_dead_end_depth(self, start_pos: tuple, came_from: tuple, map_state: np.ndarray) -> int:
+        """Calculates the depth of a dead end to measure survival turns."""
+        depth = 1
+        curr = start_pos
+        prev = came_from
+        while True:
+            next_options = []
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                np_pos = (curr[0] + dr, curr[1] + dc)
+                if self._is_valid_position(np_pos, map_state) and np_pos != prev:
+                    next_options.append(np_pos)
+
+            if len(next_options) == 1:
+                depth += 1
+                prev = curr
+                curr = next_options[0]
+            else:
+                break
+
+        return depth
+
+    def _astar_pacman_steps_to_catch(self, start_pacman: tuple, target_ghost: tuple, map_state: np.ndarray) -> int:
+        """Simulates the minimum game steps Pacman needs to catch Ghost using A*."""
+
+        def heuristic(a, b):
+            return (abs(a[0] - b[0]) + abs(a[1] - b[1])) // 2
+
+        open_set = []
+        heapq.heappush(open_set, (0 + heuristic(start_pacman, target_ghost), 0, start_pacman))
+        visited = {start_pacman: 0}
+
+        while open_set:
+            _, steps, curr_pos = heapq.heappop(open_set)
+
+            if (abs(curr_pos[0] - target_ghost[0]) + abs(curr_pos[1] - target_ghost[1])) < 2:
+                return steps
+
+            for move in [Move.UP, Move.DOWN, Move.LEFT, Move.RIGHT]:
+                dr, dc = move.value
+                for speed in [1, 2]:
+                    next_pos = (curr_pos[0] + dr * speed, curr_pos[1] + dc * speed)
+                    if speed == 2:
+                        mid_pos = (curr_pos[0] + dr, curr_pos[1] + dc)
+                        if not self._is_valid_position(mid_pos, map_state):
+                            continue
+
+                    if self._is_valid_position(next_pos, map_state):
+                        new_steps = steps + 1
+                        if next_pos not in visited or new_steps < visited[next_pos]:
+                            visited[next_pos] = new_steps
+                            f = new_steps + heuristic(next_pos, target_ghost)
+                            heapq.heappush(open_set, (f, new_steps, next_pos))
+
+        return 999
