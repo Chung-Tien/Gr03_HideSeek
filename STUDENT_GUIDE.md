@@ -339,7 +339,8 @@ You can specify additional game mechanics such as the capture distance threshold
 python arena.py --seek <your_id> --hide example_student --no-viz
 
 # Slower visualization for debugging (1 second delays)
-python arena.py --seek <your_id> --hide example_student --delay 1.0
+
+
 
 # Adjust max steps (longer game: 300, shorter game: 50)
 python arena.py --seek <your_id> --hide example_student --max-steps 300
